@@ -182,13 +182,14 @@
 
 
 import streamlit as st
-import sqlite3
-from openai import OpenAI
-from PIL import Image
 import base64
 import os
-from dotenv import load_dotenv
 import re
+from openai import OpenAI
+from PIL import Image
+from dotenv import load_dotenv
+import bcrypt
+from db_utils import add_question, add_user, get_user, add_feedback, add_message_to_question
 
 # Load environment variables
 load_dotenv()
@@ -212,39 +213,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Database setup
-conn = sqlite3.connect("users_feedback.db")
-c = conn.cursor()
-
-# Create tables for users and feedback if they don't exist
-c.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY, 
-        password TEXT NOT NULL
-    )
-''')
-c.execute('''
-    CREATE TABLE IF NOT EXISTS feedback (
-        username TEXT, 
-        feedback TEXT, 
-        FOREIGN KEY(username) REFERENCES users(username)
-    )
-''')
-conn.commit()
-
-# Utility functions for user authentication
-def signup(username, password):
-    c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
-    conn.commit()
-
-def login(username, password):
-    c.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
-    return c.fetchone()
-
-def save_feedback(username, feedback):
-    c.execute("INSERT INTO feedback (username, feedback) VALUES (?, ?)", (username, feedback))
-    conn.commit()
-
 # Helper functions for encoding image, OpenAI response, and LaTeX formatting
 def encode_image_to_base64(image_file):
     bytes_data = image_file.getvalue()
@@ -254,9 +222,9 @@ def encode_image_to_base64(image_file):
 def get_response(messages):
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=messages,
-            max_tokens=1000,
+            max_tokens=500,
             temperature=0.7
         )
         return response.choices[0].message.content
@@ -264,35 +232,142 @@ def get_response(messages):
         st.error(f"Error getting response: {str(e)}")
         return None
 
+# def format_latex_response(response):
+#     """Format the response to properly display LaTeX equations"""
+#     if response is None:
+#         return ""
+    
+#     # Step 1: Preserve existing correct LaTeX formatting
+#     # Create a placeholder for existing correct LaTeX
+#     preserved_latex = []
+    
+#     def preserve_latex(match):
+#         preserved_latex.append(match.group(0))
+#         return f"PRESERVED_LATEX_{len(preserved_latex)-1}"
+    
+#     # Preserve existing correct $$...$$ and $...$ formatting
+#     response = re.sub(r'\$\$(.*?)\$\$', preserve_latex, response, flags=re.DOTALL)
+#     response = re.sub(r'\$(.*?)\$', preserve_latex, response)
+    
+#     # Step 2: Fix incorrect LaTeX delimiters
+#     # Convert [[...]] or ((...)) to $$...$$
+#     response = re.sub(r'\[\[(.*?)\]\]|\(\((.*?)\)\)', lambda m: f"$${m.group(1) or m.group(2)}$$", response)
+    
+#     # Convert [...] to $...$ but only if not already properly formatted
+#     response = re.sub(r'\[(.*?)\]', r'$\1$', response)
+    
+#     # Step 3: Restore preserved LaTeX
+#     for i, latex in enumerate(preserved_latex):
+#         response = response.replace(f"PRESERVED_LATEX_{i}", latex)
+    
+#     return response
+
+
+# def format_latex_response(response):
+#     if response is None:
+#         return ""
+    
+#     # Step 1: Clean up the response
+#     # Remove multiple newlines and extra spaces
+#     response = re.sub(r'\n{3,}', '\n\n', response)
+#     response = re.sub(r' +', ' ', response)
+    
+#     # Step 2: Fix LaTeX delimiters
+#     replacements = {
+#         r'\(': '$',
+#         r'\)': '$',
+#         r'\[': '$$',
+#         r'\]': '$$'
+#     }
+#     for old, new in replacements.items():
+#         response = response.replace(old, new)
+    
+#     # Step 3: Fix common LaTeX commands
+#     latex_commands = {
+#         'alpha': '\\alpha',
+#         'beta': '\\beta',
+#         'gamma': '\\gamma',
+#         'delta': '\\delta',
+#         'pi': '\\pi',
+#         'theta': '\\theta',
+#         'quad': '\\quad',
+#         'text': '\\text',
+#         'mod': '\\mod',
+#         'div': '\\div'
+#     }
+#     for cmd, latex_cmd in latex_commands.items():
+#         response = response.replace(cmd, latex_cmd)
+    
+#     # Step 4: Ensure proper spacing for display equations
+#     # Add newlines before and after display equations
+#     response = re.sub(r'(?<!\n)\$\$', '\n$$', response)
+#     response = re.sub(r'\$\$(?!\n)', '$$\n', response)
+    
+#     # Step 5: Fix escaped backslashes
+#     response = re.sub(r'\\\\', r'\\', response)
+    
+#     # Step 6: Clean up any trailing/duplicate spaces around LaTeX delimiters
+#     response = re.sub(r'\s*\$\$\s*', '$$', response)
+#     response = re.sub(r'\s*\$\s*', '$', response)
+    
+#     return response
+
+
 def format_latex_response(response):
-    """Format the response to properly display LaTeX equations"""
     if response is None:
         return ""
     
-    # Step 1: Preserve existing correct LaTeX formatting
-    # Create a placeholder for existing correct LaTeX
-    preserved_latex = []
+    # Step 1: Fix LaTeX delimiters
+    response = response.replace(r'\(', '$')
+    response = response.replace(r'\)', '$')
+    response = response.replace(r'\[', '$$')
+    response = response.replace(r'\]', '$$')
     
-    def preserve_latex(match):
-        preserved_latex.append(match.group(0))
-        return f"PRESERVED_LATEX_{len(preserved_latex)-1}"
+    # Step 2: Fix common LaTeX commands
+    latex_commands = {
+        r'(?<!\\)alpha': r'\\alpha',
+        r'(?<!\\)beta': r'\\beta',
+        r'(?<!\\)gamma': r'\\gamma',
+        r'(?<!\\)delta': r'\\delta',
+        r'(?<!\\)pi': r'\\pi',
+        r'(?<!\\)theta': r'\\theta',
+        r'(?<!\\)mu': r'\\mu',
+        r'(?<!\\)quad': r'\\quad',
+        r'(?<!\\)text': r'\\text',
+        r'(?<!\\)mod': r'\\mod',
+        r'(?<!\\)div': r'\\div'
+    }
     
-    # Preserve existing correct $$...$$ and $...$ formatting
-    response = re.sub(r'\$\$(.*?)\$\$', preserve_latex, response, flags=re.DOTALL)
-    response = re.sub(r'\$(.*?)\$', preserve_latex, response)
+    for pattern, replacement in latex_commands.items():
+        response = re.sub(pattern, replacement, response)
     
-    # Step 2: Fix incorrect LaTeX delimiters
-    # Convert [[...]] or ((...)) to $$...$$
-    response = re.sub(r'\[\[(.*?)\]\]|\(\((.*?)\)\)', lambda m: f"$${m.group(1) or m.group(2)}$$", response)
+    # Step 3: Handle display equations
+    # Split into lines while preserving empty lines
+    lines = response.splitlines()
+    formatted_lines = []
     
-    # Convert [...] to $...$ but only if not already properly formatted
-    response = re.sub(r'\[(.*?)\]', r'$\1$', response)
+    for line in lines:
+        # If line contains only a display equation
+        if line.strip().startswith('$$') and line.strip().endswith('$$'):
+            formatted_lines.extend(['', line.strip(), ''])
+        else:
+            formatted_lines.append(line)
     
-    # Step 3: Restore preserved LaTeX
-    for i, latex in enumerate(preserved_latex):
-        response = response.replace(f"PRESERVED_LATEX_{i}", latex)
+    # Rejoin lines
+    response = '\n'.join(formatted_lines)
     
-    return response
+    # Step 4: Clean up spacing
+    # Remove multiple blank lines
+    response = re.sub(r'\n{3,}', '\n\n', response)
+    # Fix spacing around inline equations
+    response = re.sub(r'(?<!\$)\$(?!\$)([^\$]+?)\$(?!\$)', r' $\1$ ', response)
+    # Remove extra spaces
+    response = re.sub(r' +', ' ', response)
+    
+    return response.strip()
+
+
+
 
 # Authentication flow
 st.sidebar.title("Login / Signup")
@@ -313,15 +388,18 @@ else:
     
     if st.sidebar.button(option):
         if option == "Signup":
-            try:
-                signup(username, password)
+            if not get_user(username):
+                hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+                add_user(username, hashed_password)
                 st.success("Signup successful. Please log in.")
-            except sqlite3.IntegrityError:
+            else:
                 st.error("Username already exists. Please choose another.")
         elif option == "Login":
-            if login(username, password):
+            user = get_user(username)
+            if user and bcrypt.checkpw(password.encode(), user["password_hash"]):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
+                st.session_state["user_id"] = user["_id"]
                 st.success("Logged in successfully.")
             else:
                 st.error("Invalid username or password.")
@@ -351,8 +429,7 @@ if st.session_state["authenticated"]:
             Structure your responses as:
             - **Question Analysis:** (Brief overview)
             - **Solution Steps:** (Step-by-step solution)
-            - **Final Answer:** (Clear conclusion)
-            """}
+            - **Final Answer:** (Clear conclusion)  """}
         ]
 
     # Chatbot functionality
@@ -368,22 +445,43 @@ if st.session_state["authenticated"]:
     if st.button("Get Solution"):
         if text_question or image_question:
             if image_question:
-                base64_image = encode_image_to_base64(image_question)
+                image_base64 = encode_image_to_base64(image_question)
+
+                question_id = add_question(st.session_state["user_id"], text_question, image_base64)
+
                 content = [
-                    {"type": "text", "text": text_question or "Please analyze this question and provide a solution."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    {"type": "text", "text": text_question if text_question else "Please analyze this question and provide a step-by-step solution. Use LaTeX notation for all mathematical expressions."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                 ]
                 user_message = {"role": "user", "content": content}
             else:
+                question_id = add_question(st.session_state["user_id"], text_question, None)
                 user_message = {"role": "user", "content": text_question}
 
             st.session_state["messages"].append(user_message)
+            st.session_state["question_id"] = question_id  # Store in session state
+            
+
+            add_message_to_question(question_id, "user", user_message)
+
             with st.spinner("Thinking..."):
                 ai_response = get_response(st.session_state["messages"])
 
             if ai_response:
+
+                print(ai_response)
+                print("\n\n\n\n")
+                # Format and display the AI response with LaTeX formatting if needed
                 formatted_response = format_latex_response(ai_response)
+                print(formatted_response)
+                print("\n\n\n\n")
+                # formatted_response = ai_response
+                
+                # Append AI response to the session messages for UI display
                 st.session_state["messages"].append({"role": "assistant", "content": formatted_response})
+                
+                # Save the AI response to MongoDB
+                add_message_to_question(question_id, "assistant", formatted_response)
 
         else:
             st.warning("Please enter a question or upload an image.")
@@ -398,9 +496,9 @@ if st.session_state["authenticated"]:
 
     # Feedback section
     st.subheader("Feedback")
-    feedback_text = st.text_area("Leave your feedback")
+    feedback_text = st.text_area("Leave your feedback", height=70)
     if st.button("Submit Feedback"):
-        save_feedback(st.session_state["username"], feedback_text)
+        add_feedback(st.session_state["user_id"], question_id=st.session_state["question_id"], feedback_text=feedback_text, rating=None)
         st.success("Thank you for your feedback!")
 
     # Clear chat button
