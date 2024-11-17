@@ -4,9 +4,10 @@ import pymongo
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime
+import streamlit as st
 
 load_dotenv()
-client = pymongo.MongoClient(os.getenv("MONGODB_URI"))
+client = pymongo.MongoClient(st.secrets["MONGODB_URI"])
 db = client["doubt_solver_app"]
 
 # Access specific collections

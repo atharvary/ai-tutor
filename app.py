@@ -193,10 +193,10 @@ from db_utils import add_question, add_user, get_user, add_feedback, add_message
 
 # Load environment variables
 load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")
+# openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # Create OpenAI client instance
-client = OpenAI(api_key=openai_api_key)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Set page configuration
 st.set_page_config(page_title="IIT JEE Doubt Solver", layout="wide")
