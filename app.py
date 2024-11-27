@@ -123,7 +123,7 @@ def get_response(messages):
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            max_tokens=500,
+            max_tokens=1200,
             temperature=0.7
         )
         # Return both the response content and token usage
@@ -211,7 +211,7 @@ def update_system_message(subject, question_type):
         
         Structure your responses as:
         - **Question Analysis:** (Brief overview)
-        - **Solution Steps:** (Step-by-step solution)
+        - **Solution Steps:** (Step-by-step solution, try to stick to the point)
         - **Final Answer:** (Clear conclusion, matching the question type format)"""
     }
 
