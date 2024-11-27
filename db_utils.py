@@ -4,10 +4,9 @@ import pymongo
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime
-import streamlit as st
 
 load_dotenv()
-client = pymongo.MongoClient(st.secrets["MONGODB_URI"])
+client = pymongo.MongoClient(os.getenv("MONGODB_URI"))
 db = client["doubt_solver_app"]
 
 # Access specific collections
@@ -27,21 +26,48 @@ def add_user(username, password_hash):
 def get_user(username):
     return users_collection.find_one({"username": username})
 
-def add_question(user_id, question_text, image_base64):
-    # Add initial question as the first message in the chat history
+def count_user_messages(question_id):
+    """Count the number of user messages for a specific question"""
+    question = questions_collection.find_one({"_id": ObjectId(question_id)})
+    if not question or "messages" not in question:
+        return 0
+    
+    # Count messages where role is "user"
+    user_messages = sum(1 for msg in question["messages"] if msg["role"] == "user")
+    return user_messages
+
+def get_question(question_id):
+    """Retrieve a question document by its ID"""
+    return questions_collection.find_one({"_id": ObjectId(question_id)})
+
+# Modify the add_question function in db_utils.py
+def add_question(user_id, question_text, image_base64, subject, question_type):
     question_id = questions_collection.insert_one({
         "user_id": ObjectId(user_id),
         "question_text": question_text,
         "image_base64": image_base64,
+        "subject": subject,
+        "question_type": question_type,
         "messages": [{"role": "user", "content": question_text}],
         "timestamp": datetime.now()
     }).inserted_id
-    return str(question_id)  # Return the question ID for future updates
+    return str(question_id)
 
-def add_message_to_question(question_id, role, content):
+def add_message_to_question(question_id, role, content, token_info=None):
+    """Add a message to a question with optional token usage information"""
+    message_data = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now()
+    }
+    
+    # Add token info if provided (for assistant messages)
+    if token_info:
+        message_data["token_usage"] = token_info
+        
     questions_collection.update_one(
         {"_id": ObjectId(question_id)},
-        {"$push": {"messages": {"role": role, "content": content}}}
+        {"$push": {"messages": message_data}}
     )
 
 def add_feedback(user_id, question_id, feedback_text, rating):
