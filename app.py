@@ -237,18 +237,24 @@ else:
             if not get_user(username):
                 hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
                 add_user(username, hashed_password)
-                st.success("Signup successful. Please log in.")
+                # st.success("Signup successful. Please log in.")
+                st.sidebar.success("Signup successful. Please log in.")
             else:
-                st.error("Username already exists. Please choose another.")
+                # st.error("Username already exists. Please choose another.")
+                st.sidebar.error("Username already exists. Please choose another.")
         elif option == "Login":
             user = get_user(username)
             if user and bcrypt.checkpw(password.encode(), user["password_hash"]):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.session_state["user_id"] = user["_id"]
-                st.success("Logged in successfully.")
+                # st.success("Logged in successfully.")
+                st.sidebar.success("Logged in successfully.")
+                
             else:
-                st.error("Invalid username or password.")
+                # st.error("Invalid username or password.")
+                st.sidebar.error("Invalid username or password.")
+
 
 # Main app content
 if st.session_state["authenticated"]:
