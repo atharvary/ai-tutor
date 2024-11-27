@@ -6,3 +6,4 @@ openai
 python-dotenv
 pymongo
 bcrypt
+imagekitio
